@@ -3,129 +3,161 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Zeiterfassung Pro V4</title>
+    <title>Zeiterfassung Pro V5</title>
     <style>
         body { font-family: -apple-system, system-ui, sans-serif; background-color: #f0f2f5; padding: 15px; color: #1c1e21; margin: 0; }
         .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 15px; }
-        h2 { margin-top: 0; font-size: 16px; color: #007aff; text-transform: uppercase; }
+        h2 { margin-top: 0; font-size: 16px; color: #007aff; text-transform: uppercase; border-bottom: 2px solid #f0f2f5; padding-bottom: 8px; }
         label { font-size: 13px; color: #666; display: block; margin-bottom: 4px; }
         input, button { width: 100%; padding: 12px; margin: 5px 0 15px 0; border-radius: 8px; border: 1px solid #ddd; font-size: 16px; box-sizing: border-box; }
+        .row { display: flex; gap: 10px; }
+        .row > div { flex: 1; }
         .btn-start { background: #007aff; color: white; border: none; font-weight: bold; height: 60px; font-size: 18px; }
         .btn-stop { background: #ff3b30; color: white; border: none; font-weight: bold; height: 60px; font-size: 18px; }
+        .btn-add { background: #ff9500; color: white; border: none; font-weight: bold; }
         .btn-mail { background: #34c759; color: white; border: none; font-weight: bold; }
         .timer { font-size: 50px; text-align: center; margin: 10px 0; font-family: 'Courier New', monospace; font-weight: bold; color: #333; }
-        .log-item { padding: 12px; border-bottom: 1px solid #eee; font-size: 14px; position: relative; line-height: 1.4; }
-        .log-item b { font-size: 15px; color: #000; }
+        .day-group { border: 1px solid #eee; border-radius: 8px; margin-bottom: 15px; overflow: hidden; }
+        .day-header { background: #f8f9fa; padding: 10px; font-weight: bold; font-size: 15px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
+        .log-item { padding: 10px; border-bottom: 1px solid #eee; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+        .log-item:last-child { border-bottom: none; }
+        .day-summary { padding: 10px; background: #fff; font-size: 14px; line-height: 1.5; }
         .overtime { color: #34c759; font-weight: bold; }
         .undertime { color: #ff3b30; font-weight: bold; }
-        .delete-btn { position: absolute; right: 0; top: 12px; background: none; border: none; color: #ccc; font-size: 18px; padding: 5px 10px; width: auto; margin: 0; }
-        .decimal-hint { font-size: 11px; color: #888; text-align: center; margin-top: 10px; line-height: 1.5; }
+        .delete-btn { background: #ff3b30; color: white; border: none; border-radius: 5px; padding: 5px 10px; font-size: 12px; margin: 0; width: auto; height: auto; }
     </style>
 </head>
 <body>
 
     <div class="card">
         <h2>Profil & Soll</h2>
-        <label>Mitarbeiter Name</label>
-        <input type="text" id="userName" placeholder="z.B. Alexander">
+        <input type="text" id="userName" placeholder="Mitarbeiter Name">
         <label>Tägliche Soll-Stunden (Dezimal, z.B. 8.0)</label>
         <input type="number" id="dailySoll" value="8.0" step="0.1">
     </div>
 
     <div class="card">
+        <h2>Live Timer</h2>
         <div class="timer" id="display">00:00:00</div>
         <button id="mainBtn" class="btn-start" onclick="toggleTimer()">Timer Starten</button>
     </div>
 
     <div class="card">
-        <h2>Deine Historie</h2>
-        <div id="logList"></div>
-        
-        <div class="decimal-hint">
-            <b>Umrechnungshilfe:</b><br>
-            0,25h = 15 Min | 0,50h = 30 Min | 0,75h = 45 Min<br>
-            <i>Gesetzliche Pausen werden bei Einzelsessions automatisch abgezogen.</i>
+        <h2>Zeit Nachtragen</h2>
+        <label>Datum</label>
+        <input type="date" id="manualDate">
+        <div class="row">
+            <div>
+                <label>Von (Uhrzeit)</label>
+                <input type="time" id="manualStart">
+            </div>
+            <div>
+                <label>Bis (Uhrzeit)</label>
+                <input type="time" id="manualEnd">
+            </div>
         </div>
+        <button class="btn-add" onclick="addManualEntry()">Eintrag hinzufügen</button>
+    </div>
 
+    <div class="card">
+        <h2>Historie & Abrechnung</h2>
+        <div id="logList"></div>
         <button class="btn-mail" onclick="sendEmail()">Bericht per E-Mail senden</button>
     </div>
 
     <script>
         let timerInterval;
         let isRunning = false;
-        let startTime = 0; // Merkt sich jetzt die exakte Start-Uhrzeit
+        let sessionStartTime = 0;
         
-        // Wir nutzen den gleichen Speicher-Schlüssel wie vorher, damit keine Daten verloren gehen
-        let logs = JSON.parse(localStorage.getItem('workLogsV3_1')) || [];
+        // Neues Datenmodell ab V5
+        let logs = JSON.parse(localStorage.getItem('workLogsV5')) || [];
 
+        // Setze heutiges Datum in das manuelle Feld
+        document.getElementById('manualDate').valueAsDate = new Date();
         renderLogs();
 
+        // --- TIMER LOGIK ---
         function toggleTimer() {
             const btn = document.getElementById('mainBtn');
             if (!isRunning) {
-                // TIMER STARTEN
                 isRunning = true;
-                startTime = Date.now(); // Speichert den aktuellen Timestamp in Millisekunden
-                
+                sessionStartTime = Date.now();
                 btn.innerText = "Stopp & Speichern";
                 btn.className = "btn-stop";
-                
-                // Anzeige aktualisieren
                 timerInterval = setInterval(updateDisplay, 1000);
-                updateDisplay(); 
             } else {
-                // TIMER STOPPEN
                 isRunning = false;
                 btn.innerText = "Timer Starten";
                 btn.className = "btn-start";
                 clearInterval(timerInterval);
                 
-                // Berechne die echten verstrichenen Sekunden
-                let elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-                let bruttoMin = Math.round(elapsedSeconds / 60);
+                // Erstelle Start- und End-Uhrzeit aus dem Timer
+                let startObj = new Date(sessionStartTime);
+                let endObj = new Date();
                 
-                saveEntry(bruttoMin);
+                let startStr = startObj.getHours().toString().padStart(2, '0') + ":" + startObj.getMinutes().toString().padStart(2, '0');
+                let endStr = endObj.getHours().toString().padStart(2, '0') + ":" + endObj.getMinutes().toString().padStart(2, '0');
+                let dateStr = startObj.toISOString().split('T')[0]; // Format: YYYY-MM-DD
                 
-                // Anzeige zurücksetzen
+                saveEntry(dateStr, startStr, endStr);
                 document.getElementById('display').innerText = "00:00:00";
             }
         }
 
         function updateDisplay() {
-            if (!isRunning) return;
-            
-            // Immer die absolute Differenz zur Startzeit berechnen
-            let elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-            
-            let h = Math.floor(elapsedSeconds / 3600).toString().padStart(2, '0');
-            let m = Math.floor((elapsedSeconds % 3600) / 60).toString().padStart(2, '0');
-            let s = (elapsedSeconds % 60).toString().padStart(2, '0');
-            
+            let elapsed = Math.floor((Date.now() - sessionStartTime) / 1000);
+            let h = Math.floor(elapsed / 3600).toString().padStart(2, '0');
+            let m = Math.floor((elapsed % 3600) / 60).toString().padStart(2, '0');
+            let s = (elapsed % 60).toString().padStart(2, '0');
             document.getElementById('display').innerText = `${h}:${m}:${s}`;
         }
 
-        function formatToClock(totalMinutes) {
-            let h = Math.floor(totalMinutes / 60);
-            let m = Math.round(totalMinutes % 60);
-            return `${h}:${m.toString().padStart(2, '0')}h`;
+        // --- MANUELLES NACHTRAGEN ---
+        function addManualEntry() {
+            let date = document.getElementById('manualDate').value;
+            let start = document.getElementById('manualStart').value;
+            let end = document.getElementById('manualEnd').value;
+            
+            if(!date || !start || !end) {
+                alert("Bitte Datum, Start- und Endzeit ausfüllen.");
+                return;
+            }
+            saveEntry(date, start, end);
+            
+            // Felder leeren
+            document.getElementById('manualStart').value = "";
+            document.getElementById('manualEnd').value = "";
         }
 
-        function saveEntry(bruttoMin) {
-            let pause = 0;
-            if (bruttoMin >= 540) pause = 45;
-            else if (bruttoMin >= 360) pause = 30;
-
-            const entry = {
-                id: Date.now(),
-                date: new Date().toLocaleDateString('de-DE'),
-                brutto: bruttoMin,
-                pause: pause,
-                netto: Math.max(0, bruttoMin - pause)
-            };
-
-            logs.push(entry);
-            localStorage.setItem('workLogsV3_1', JSON.stringify(logs));
+        // --- SPEICHERN & BERECHNEN ---
+        function saveEntry(date, start, end) {
+            logs.push({ id: Date.now(), date: date, start: start, end: end });
+            localStorage.setItem('workLogsV5', JSON.stringify(logs));
             renderLogs();
+        }
+
+        function deleteLog(id) {
+            if(confirm("Diesen Block wirklich löschen?")) {
+                logs = logs.filter(l => l.id !== id);
+                localStorage.setItem('workLogsV5', JSON.stringify(logs));
+                renderLogs();
+            }
+        }
+
+        // Hilfsfunktionen für Zeit-Mathe
+        function timeToMins(t) {
+            let [h,m] = t.split(':').map(Number);
+            return h * 60 + m;
+        }
+        function minsToClock(m) {
+            let h = Math.floor(m / 60);
+            let mins = Math.round(m % 60);
+            return `${h}:${mins.toString().padStart(2, '0')}h`;
+        }
+        function formatDate(isoDate) {
+            let parts = isoDate.split('-');
+            return `${parts[2]}.${parts[1]}.${parts[0]}`;
         }
 
         function renderLogs() {
@@ -133,47 +165,105 @@
             const sollStd = parseFloat(document.getElementById('dailySoll').value) || 0;
             list.innerHTML = "";
             
-            logs.forEach((log, index) => {
-                const nettoDezimal = (log.netto / 60);
-                const diff = nettoDezimal - sollStd;
-                const diffClass = diff >= 0 ? "overtime" : "undertime";
+            // 1. Einträge nach Datum gruppieren
+            let days = {};
+            logs.forEach(log => {
+                if(!days[log.date]) days[log.date] = [];
+                days[log.date].push(log);
+            });
+
+            // 2. Jeden Tag berechnen
+            let sortedDates = Object.keys(days).sort().reverse(); // Neueste zuerst
+            
+            sortedDates.forEach(date => {
+                let dailyLogs = days[date];
                 
-                list.innerHTML += `
-                    <div class="log-item">
-                        <b>${log.date}</b> | Netto: ${formatToClock(log.netto)} (<b>${nettoDezimal.toFixed(2)}</b>)<br>
-                        <small>Brutto: ${log.brutto}m | Pause: -${log.pause}m | Soll: ${sollStd}h</small><br>
-                        <span class="${diffClass}">Differenz: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)} Std.</span>
-                        <button class="delete-btn" onclick="deleteLog(${index})">✕</button>
-                    </div>`;
+                let minStart = 9999;
+                let maxEnd = 0;
+                let trackedWorkMins = 0;
+                let blocksHTML = "";
+                
+                // Berechne Blöcke des Tages
+                dailyLogs.forEach(log => {
+                    let s = timeToMins(log.start);
+                    let e = timeToMins(log.end);
+                    if (e < s) e += 24 * 60; // Falls über Mitternacht gearbeitet wurde
+                    
+                    if (s < minStart) minStart = s;
+                    if (e > maxEnd) maxEnd = e;
+                    
+                    let blockDur = e - s;
+                    trackedWorkMins += blockDur;
+                    
+                    blocksHTML += `
+                        <div class="log-item">
+                            <span>🕒 ${log.start} - ${log.end} Uhr (${minsToClock(blockDur)})</span>
+                            <button class="delete-btn" onclick="deleteLog(${log.id})">✕</button>
+                        </div>
+                    `;
+                });
+
+                // Pausen-Logik (Die intelligente Berechnung)
+                let totalPresence = maxEnd - minStart; 
+                let takenBreak = totalPresence - trackedWorkMins; // Die echte Lücke zwischen den Blöcken!
+                
+                // Wie viel Pause verlangt das Gesetz basierend auf der gestoppten Arbeit?
+                let requiredBreak = 0;
+                if (trackedWorkMins >= 540) requiredBreak = 45; // ab 9 Stunden
+                else if (trackedWorkMins >= 360) requiredBreak = 30; // ab 6 Stunden
+
+                // Wurde zu wenig Pause gemacht? Wenn ja, Differenz abziehen
+                let missingBreak = Math.max(0, requiredBreak - takenBreak);
+                let netWorkMins = trackedWorkMins - missingBreak;
+                
+                // Differenz zum Soll
+                let netWorkDezimal = netWorkMins / 60;
+                let diff = netWorkDezimal - sollStd;
+                let diffClass = diff >= 0 ? "overtime" : "undertime";
+
+                // Tag anzeigen
+                let dayContainer = document.createElement('div');
+                dayContainer.className = "day-group";
+                dayContainer.innerHTML = `
+                    <div class="day-header">
+                        <span>📅 ${formatDate(date)}</span>
+                        <span>Netto: ${minsToClock(netWorkMins)}</span>
+                    </div>
+                    ${blocksHTML}
+                    <div class="day-summary">
+                        <b>Zusammenfassung des Tages:</b><br>
+                        Gesamte Arbeitszeit (gestoppt): ${minsToClock(trackedWorkMins)}<br>
+                        Bereits gemachte Pausen (Lücken): ${takenBreak} Min.<br>
+                        Gesetzlich gefordert: ${requiredBreak} Min.<br>
+                        <span style="color: #ff9500;">Automatischer Abzug (fehlende Pause): -${missingBreak} Min.</span><br>
+                        <b>Abrechnung: ${netWorkDezimal.toFixed(2)} Dezimal-Stunden</b><br>
+                        <span class="${diffClass}">Tages-Saldo: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)} Stunden</span>
+                    </div>
+                `;
+                list.appendChild(dayContainer);
             });
         }
 
-        function deleteLog(index) {
-            if(confirm("Eintrag löschen?")) {
-                logs.splice(index, 1);
-                localStorage.setItem('workLogsV3_1', JSON.stringify(logs));
-                renderLogs();
-            }
-        }
-
+        // --- E-MAIL EXPORT ---
         function sendEmail() {
             const name = document.getElementById('userName').value || "Mitarbeiter";
-            let totalDiff = 0;
             let bodyText = `ZEITERFASSUNG BERICHT: ${name}\n`;
             bodyText += `====================================\n\n`;
 
-            logs.forEach(log => {
-                const nettoDezimal = (log.netto / 60);
-                const diff = nettoDezimal - (parseFloat(document.getElementById('dailySoll').value) || 0);
-                totalDiff += diff;
-
-                bodyText += `${log.date}:\n`;
-                bodyText += `  Netto: ${formatToClock(log.netto)} (${nettoDezimal.toFixed(2)} Dezimal)\n`;
-                bodyText += `  Pause: ${log.pause} Min. | Differenz: ${diff.toFixed(2)}h\n`;
+            const list = document.getElementById('logList');
+            // Wir bedienen uns eines kleinen Tricks und exportieren den formatierten Text direkt aus der Anzeige
+            let days = document.querySelectorAll('.day-group');
+            days.forEach(day => {
+                let date = day.querySelector('.day-header span').innerText;
+                let net = day.querySelector('.day-header span:nth-child(2)').innerText;
+                let blocks = day.querySelectorAll('.log-item span');
+                let summary = day.querySelector('.day-summary').innerText;
+                
+                bodyText += `${date} | ${net}\n`;
+                blocks.forEach(b => bodyText += `  - ${b.innerText}\n`);
+                bodyText += `\n  ${summary.replace(/\n/g, '\n  ')}\n`;
                 bodyText += `------------------------------------\n`;
             });
-
-            bodyText += `\nGESAMT-SALDO: ${totalDiff.toFixed(2)} Stunden`;
 
             window.location.href = `mailto:?subject=Zeiten_${name}&body=${encodeURIComponent(bodyText)}`;
         }

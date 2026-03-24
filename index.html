@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zeiterfassung Pro V4</title>
+    <style>
+        body { font-family: -apple-system, system-ui, sans-serif; background-color: #f0f2f5; padding: 15px; color: #1c1e21; margin: 0; }
+        .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        h2 { margin-top: 0; font-size: 16px; color: #007aff; text-transform: uppercase; }
+        label { font-size: 13px; color: #666; display: block; margin-bottom: 4px; }
+        input, button { width: 100%; padding: 12px; margin: 5px 0 15px 0; border-radius: 8px; border: 1px solid #ddd; font-size: 16px; box-sizing: border-box; }
+        .btn-start { background: #007aff; color: white; border: none; font-weight: bold; height: 60px; font-size: 18px; }
+        .btn-stop { background: #ff3b30; color: white; border: none; font-weight: bold; height: 60px; font-size: 18px; }
+        .btn-mail { background: #34c759; color: white; border: none; font-weight: bold; }
+        .timer { font-size: 50px; text-align: center; margin: 10px 0; font-family: 'Courier New', monospace; font-weight: bold; color: #333; }
+        .log-item { padding: 12px; border-bottom: 1px solid #eee; font-size: 14px; position: relative; line-height: 1.4; }
+        .log-item b { font-size: 15px; color: #000; }
+        .overtime { color: #34c759; font-weight: bold; }
+        .undertime { color: #ff3b30; font-weight: bold; }
+        .delete-btn { position: absolute; right: 0; top: 12px; background: none; border: none; color: #ccc; font-size: 18px; padding: 5px 10px; width: auto; margin: 0; }
+        .decimal-hint { font-size: 11px; color: #888; text-align: center; margin-top: 10px; line-height: 1.5; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>Profil & Soll</h2>
+        <label>Mitarbeiter Name</label>
+        <input type="text" id="userName" placeholder="z.B. Alexander">
+        <label>Tägliche Soll-Stunden (Dezimal, z.B. 8.0)</label>
+        <input type="number" id="dailySoll" value="8.0" step="0.1">
+    </div>
+
+    <div class="card">
+        <div class="timer" id="display">00:00:00</div>
+        <button id="mainBtn" class="btn-start" onclick="toggleTimer()">Timer Starten</button>
+    </div>
+
+    <div class="card">
+        <h2>Deine Historie</h2>
+        <div id="logList"></div>
+        
+        <div class="decimal-hint">
+            <b>Umrechnungshilfe:</b><br>
+            0,25h = 15 Min | 0,50h = 30 Min | 0,75h = 45 Min<br>
+            <i>Gesetzliche Pausen werden bei Einzelsessions automatisch abgezogen.</i>
+        </div>
+
+        <button class="btn-mail" onclick="sendEmail()">Bericht per E-Mail senden</button>
+    </div>
+
+    <script>
+        let timerInterval;
+        let isRunning = false;
+        let startTime = 0; // Merkt sich jetzt die exakte Start-Uhrzeit
+        
+        // Wir nutzen den gleichen Speicher-Schlüssel wie vorher, damit keine Daten verloren gehen
+        let logs = JSON.parse(localStorage.getItem('workLogsV3_1')) || [];
+
+        renderLogs();
+
+        function toggleTimer() {
+            const btn = document.getElementById('mainBtn');
+            if (!isRunning) {
+                // TIMER STARTEN
+                isRunning = true;
+                startTime = Date.now(); // Speichert den aktuellen Timestamp in Millisekunden
+                
+                btn.innerText = "Stopp & Speichern";
+                btn.className = "btn-stop";
+                
+                // Anzeige aktualisieren
+                timerInterval = setInterval(updateDisplay, 1000);
+                updateDisplay(); 
+            } else {
+                // TIMER STOPPEN
+                isRunning = false;
+                btn.innerText = "Timer Starten";
+                btn.className = "btn-start";
+                clearInterval(timerInterval);
+                
+                // Berechne die echten verstrichenen Sekunden
+                let elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+                let bruttoMin = Math.round(elapsedSeconds / 60);
+                
+                saveEntry(bruttoMin);
+                
+                // Anzeige zurücksetzen
+                document.getElementById('display').innerText = "00:00:00";
+            }
+        }
+
+        function updateDisplay() {
+            if (!isRunning) return;
+            
+            // Immer die absolute Differenz zur Startzeit berechnen
+            let elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+            
+            let h = Math.floor(elapsedSeconds / 3600).toString().padStart(2, '0');
+            let m = Math.floor((elapsedSeconds % 3600) / 60).toString().padStart(2, '0');
+            let s = (elapsedSeconds % 60).toString().padStart(2, '0');
+            
+            document.getElementById('display').innerText = `${h}:${m}:${s}`;
+        }
+
+        function formatToClock(totalMinutes) {
+            let h = Math.floor(totalMinutes / 60);
+            let m = Math.round(totalMinutes % 60);
+            return `${h}:${m.toString().padStart(2, '0')}h`;
+        }
+
+        function saveEntry(bruttoMin) {
+            let pause = 0;
+            if (bruttoMin >= 540) pause = 45;
+            else if (bruttoMin >= 360) pause = 30;
+
+            const entry = {
+                id: Date.now(),
+                date: new Date().toLocaleDateString('de-DE'),
+                brutto: bruttoMin,
+                pause: pause,
+                netto: Math.max(0, bruttoMin - pause)
+            };
+
+            logs.push(entry);
+            localStorage.setItem('workLogsV3_1', JSON.stringify(logs));
+            renderLogs();
+        }
+
+        function renderLogs() {
+            const list = document.getElementById('logList');
+            const sollStd = parseFloat(document.getElementById('dailySoll').value) || 0;
+            list.innerHTML = "";
+            
+            logs.forEach((log, index) => {
+                const nettoDezimal = (log.netto / 60);
+                const diff = nettoDezimal - sollStd;
+                const diffClass = diff >= 0 ? "overtime" : "undertime";
+                
+                list.innerHTML += `
+                    <div class="log-item">
+                        <b>${log.date}</b> | Netto: ${formatToClock(log.netto)} (<b>${nettoDezimal.toFixed(2)}</b>)<br>
+                        <small>Brutto: ${log.brutto}m | Pause: -${log.pause}m | Soll: ${sollStd}h</small><br>
+                        <span class="${diffClass}">Differenz: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)} Std.</span>
+                        <button class="delete-btn" onclick="deleteLog(${index})">✕</button>
+                    </div>`;
+            });
+        }
+
+        function deleteLog(index) {
+            if(confirm("Eintrag löschen?")) {
+                logs.splice(index, 1);
+                localStorage.setItem('workLogsV3_1', JSON.stringify(logs));
+                renderLogs();
+            }
+        }
+
+        function sendEmail() {
+            const name = document.getElementById('userName').value || "Mitarbeiter";
+            let totalDiff = 0;
+            let bodyText = `ZEITERFASSUNG BERICHT: ${name}\n`;
+            bodyText += `====================================\n\n`;
+
+            logs.forEach(log => {
+                const nettoDezimal = (log.netto / 60);
+                const diff = nettoDezimal - (parseFloat(document.getElementById('dailySoll').value) || 0);
+                totalDiff += diff;
+
+                bodyText += `${log.date}:\n`;
+                bodyText += `  Netto: ${formatToClock(log.netto)} (${nettoDezimal.toFixed(2)} Dezimal)\n`;
+                bodyText += `  Pause: ${log.pause} Min. | Differenz: ${diff.toFixed(2)}h\n`;
+                bodyText += `------------------------------------\n`;
+            });
+
+            bodyText += `\nGESAMT-SALDO: ${totalDiff.toFixed(2)} Stunden`;
+
+            window.location.href = `mailto:?subject=Zeiten_${name}&body=${encodeURIComponent(bodyText)}`;
+        }
+    </script>
+</body>
+</html>

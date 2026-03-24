@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Zeiterfassung Pro V5</title>
+    <title>Zeiterfassung Pro V6.1</title>
     <style>
         body { font-family: -apple-system, system-ui, sans-serif; background-color: #f0f2f5; padding: 15px; color: #1c1e21; margin: 0; }
         .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 15px; }
@@ -15,16 +15,20 @@
         .btn-start { background: #007aff; color: white; border: none; font-weight: bold; height: 60px; font-size: 18px; }
         .btn-stop { background: #ff3b30; color: white; border: none; font-weight: bold; height: 60px; font-size: 18px; }
         .btn-add { background: #ff9500; color: white; border: none; font-weight: bold; }
+        .btn-holiday { background: #4caf50; color: white; border: none; font-weight: bold; }
+        .btn-sick { background: #f44336; color: white; border: none; font-weight: bold; }
         .btn-mail { background: #34c759; color: white; border: none; font-weight: bold; }
         .timer { font-size: 50px; text-align: center; margin: 10px 0; font-family: 'Courier New', monospace; font-weight: bold; color: #333; }
         .day-group { border: 1px solid #eee; border-radius: 8px; margin-bottom: 15px; overflow: hidden; }
         .day-header { background: #f8f9fa; padding: 10px; font-weight: bold; font-size: 15px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
         .log-item { padding: 10px; border-bottom: 1px solid #eee; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
-        .log-item:last-child { border-bottom: none; }
         .day-summary { padding: 10px; background: #fff; font-size: 14px; line-height: 1.5; }
         .overtime { color: #34c759; font-weight: bold; }
         .undertime { color: #ff3b30; font-weight: bold; }
         .delete-btn { background: #ff3b30; color: white; border: none; border-radius: 5px; padding: 5px 10px; font-size: 12px; margin: 0; width: auto; height: auto; }
+        .info-box { background: #e3f2fd; border: 1px solid #90caf9; padding: 12px; border-radius: 8px; margin-bottom: 15px; font-size: 15px; }
+        .total-box { background: #e8f5e9; border: 1px solid #a5d6a7; padding: 15px; border-radius: 8px; margin-top: 15px; font-size: 16px; text-align: center; }
+        .month-selector { background: #fff3e0; border: 1px solid #ffcc80; padding: 10px; border-radius: 8px; margin-bottom: 15px; }
     </style>
 </head>
 <body>
@@ -33,7 +37,7 @@
         <h2>Profil & Soll</h2>
         <input type="text" id="userName" placeholder="Mitarbeiter Name">
         <label>Tägliche Soll-Stunden (Dezimal, z.B. 8.0)</label>
-        <input type="number" id="dailySoll" value="8.0" step="0.1">
+        <input type="number" id="dailySoll" value="8.0" step="0.1" onchange="renderLogs()">
     </div>
 
     <div class="card">
@@ -43,38 +47,48 @@
     </div>
 
     <div class="card">
-        <h2>Zeit Nachtragen</h2>
-        <label>Datum</label>
+        <h2>Nachtragen / Abwesenheit</h2>
+        <label>Datum wählen</label>
         <input type="date" id="manualDate">
-        <div class="row">
-            <div>
-                <label>Von (Uhrzeit)</label>
-                <input type="time" id="manualStart">
+        
+        <div style="background: #f9f9f9; padding: 10px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #eee;">
+            <label style="font-weight:bold; margin-bottom:10px;">Arbeitszeit manuell:</label>
+            <div class="row">
+                <div><label>Von</label><input type="time" id="manualStart" style="margin-bottom:0;"></div>
+                <div><label>Bis</label><input type="time" id="manualEnd" style="margin-bottom:0;"></div>
             </div>
-            <div>
-                <label>Bis (Uhrzeit)</label>
-                <input type="time" id="manualEnd">
-            </div>
+            <button class="btn-add" style="margin-top:10px; margin-bottom:0;" onclick="addManualEntry()">Zeit eintragen</button>
         </div>
-        <button class="btn-add" onclick="addManualEntry()">Eintrag hinzufügen</button>
+
+        <div class="row">
+            <button class="btn-holiday" onclick="addAbsence('urlaub')">🌴 Urlaub</button>
+            <button class="btn-sick" onclick="addAbsence('krank')">🤒 Krank</button>
+        </div>
     </div>
 
     <div class="card">
         <h2>Historie & Abrechnung</h2>
+        
+        <div class="month-selector">
+            <label><b>Abrechnungsmonat wählen:</b></label>
+            <input type="month" id="monthPicker" onchange="renderLogs()" style="margin-bottom: 0;">
+        </div>
+
         <div id="logList"></div>
-        <button class="btn-mail" onclick="sendEmail()">Bericht per E-Mail senden</button>
+        <br>
+        <button class="btn-mail" onclick="sendEmail()">Diesen Monat per E-Mail senden</button>
     </div>
 
     <script>
         let timerInterval;
         let isRunning = false;
         let sessionStartTime = 0;
-        
-        // Neues Datenmodell ab V5
-        let logs = JSON.parse(localStorage.getItem('workLogsV5')) || [];
+        let logs = JSON.parse(localStorage.getItem('workLogsV5')) || []; // Nutzt den gleichen Tresor wie vorher
 
-        // Setze heutiges Datum in das manuelle Feld
-        document.getElementById('manualDate').valueAsDate = new Date();
+        const today = new Date();
+        document.getElementById('manualDate').valueAsDate = today;
+        document.getElementById('monthPicker').value = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
+        
         renderLogs();
 
         // --- TIMER LOGIK ---
@@ -92,15 +106,14 @@
                 btn.className = "btn-start";
                 clearInterval(timerInterval);
                 
-                // Erstelle Start- und End-Uhrzeit aus dem Timer
                 let startObj = new Date(sessionStartTime);
                 let endObj = new Date();
                 
                 let startStr = startObj.getHours().toString().padStart(2, '0') + ":" + startObj.getMinutes().toString().padStart(2, '0');
                 let endStr = endObj.getHours().toString().padStart(2, '0') + ":" + endObj.getMinutes().toString().padStart(2, '0');
-                let dateStr = startObj.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+                let dateStr = startObj.toISOString().split('T')[0];
                 
-                saveEntry(dateStr, startStr, endStr);
+                saveEntry(dateStr, startStr, endStr, 'work');
                 document.getElementById('display').innerText = "00:00:00";
             }
         }
@@ -113,145 +126,179 @@
             document.getElementById('display').innerText = `${h}:${m}:${s}`;
         }
 
-        // --- MANUELLES NACHTRAGEN ---
+        // --- MANUELLES NACHTRAGEN & ABWESENHEIT ---
         function addManualEntry() {
             let date = document.getElementById('manualDate').value;
             let start = document.getElementById('manualStart').value;
             let end = document.getElementById('manualEnd').value;
-            
-            if(!date || !start || !end) {
-                alert("Bitte Datum, Start- und Endzeit ausfüllen.");
-                return;
-            }
-            saveEntry(date, start, end);
-            
-            // Felder leeren
+            if(!date || !start || !end) { alert("Bitte Datum, Start- und Endzeit ausfüllen."); return; }
+            saveEntry(date, start, end, 'work');
             document.getElementById('manualStart').value = "";
             document.getElementById('manualEnd').value = "";
         }
 
-        // --- SPEICHERN & BERECHNEN ---
-        function saveEntry(date, start, end) {
-            logs.push({ id: Date.now(), date: date, start: start, end: end });
+        function addAbsence(type) {
+            let date = document.getElementById('manualDate').value;
+            if(!date) { alert("Bitte zuerst ein Datum wählen."); return; }
+            // Speichert einen speziellen Block mit dem Typ "urlaub" oder "krank"
+            saveEntry(date, "00:00", "00:00", type);
+        }
+
+        // --- SPEICHERN ---
+        function saveEntry(date, start, end, type) {
+            logs.push({ id: Date.now(), date: date, start: start, end: end, type: type });
             localStorage.setItem('workLogsV5', JSON.stringify(logs));
             renderLogs();
         }
 
         function deleteLog(id) {
-            if(confirm("Diesen Block wirklich löschen?")) {
+            if(confirm("Diesen Eintrag löschen?")) {
                 logs = logs.filter(l => l.id !== id);
                 localStorage.setItem('workLogsV5', JSON.stringify(logs));
                 renderLogs();
             }
         }
 
-        // Hilfsfunktionen für Zeit-Mathe
-        function timeToMins(t) {
-            let [h,m] = t.split(':').map(Number);
-            return h * 60 + m;
-        }
-        function minsToClock(m) {
-            let h = Math.floor(m / 60);
-            let mins = Math.round(m % 60);
-            return `${h}:${mins.toString().padStart(2, '0')}h`;
-        }
-        function formatDate(isoDate) {
-            let parts = isoDate.split('-');
-            return `${parts[2]}.${parts[1]}.${parts[0]}`;
-        }
+        // --- HILFSFUNKTIONEN ---
+        function timeToMins(t) { let [h,m] = t.split(':').map(Number); return h * 60 + m; }
+        function minsToClock(m) { let h = Math.floor(m / 60); let mins = Math.round(m % 60); return `${h}:${mins.toString().padStart(2, '0')}h`; }
+        function formatDate(iso) { let parts = iso.split('-'); return `${parts[2]}.${parts[1]}.${parts[0]}`; }
 
+        // --- BERECHNUNG & ANZEIGE ---
         function renderLogs() {
             const list = document.getElementById('logList');
             const sollStd = parseFloat(document.getElementById('dailySoll').value) || 0;
-            list.innerHTML = "";
+            const selectedMonth = document.getElementById('monthPicker').value; 
             
-            // 1. Einträge nach Datum gruppieren
+            list.innerHTML = "";
             let days = {};
+            
             logs.forEach(log => {
                 if(!days[log.date]) days[log.date] = [];
                 days[log.date].push(log);
             });
 
-            // 2. Jeden Tag berechnen
-            let sortedDates = Object.keys(days).sort().reverse(); // Neueste zuerst
-            
+            let sortedDates = Object.keys(days).sort().reverse();
+            let pastDiffMins = 0;       
+            let currentDiffMins = 0;    
+            let htmlOutput = "";
+
             sortedDates.forEach(date => {
                 let dailyLogs = days[date];
-                
-                let minStart = 9999;
-                let maxEnd = 0;
-                let trackedWorkMins = 0;
+                let minStart = 9999, maxEnd = 0, trackedWorkMins = 0;
                 let blocksHTML = "";
+                let isAbsence = false;
+                let absenceName = "";
                 
-                // Berechne Blöcke des Tages
                 dailyLogs.forEach(log => {
-                    let s = timeToMins(log.start);
-                    let e = timeToMins(log.end);
-                    if (e < s) e += 24 * 60; // Falls über Mitternacht gearbeitet wurde
+                    let type = log.type || 'work'; // Falls alte Einträge keinen Typ haben
                     
-                    if (s < minStart) minStart = s;
-                    if (e > maxEnd) maxEnd = e;
-                    
-                    let blockDur = e - s;
-                    trackedWorkMins += blockDur;
-                    
-                    blocksHTML += `
-                        <div class="log-item">
-                            <span>🕒 ${log.start} - ${log.end} Uhr (${minsToClock(blockDur)})</span>
-                            <button class="delete-btn" onclick="deleteLog(${log.id})">✕</button>
-                        </div>
-                    `;
+                    if(type === 'urlaub') {
+                        isAbsence = true; absenceName = "Urlaub 🌴";
+                        blocksHTML += `<div class="log-item" style="background:#e8f5e9;"><span>${absenceName} (Ganzer Tag)</span><button class="delete-btn" onclick="deleteLog(${log.id})">✕</button></div>`;
+                    } 
+                    else if(type === 'krank') {
+                        isAbsence = true; absenceName = "Krank 🤒";
+                        blocksHTML += `<div class="log-item" style="background:#ffebee;"><span>${absenceName} (Ganzer Tag)</span><button class="delete-btn" onclick="deleteLog(${log.id})">✕</button></div>`;
+                    } 
+                    else {
+                        let s = timeToMins(log.start);
+                        let e = timeToMins(log.end);
+                        if (e < s) e += 24 * 60;
+                        if (s < minStart) minStart = s;
+                        if (e > maxEnd) maxEnd = e;
+                        
+                        let blockDur = e - s;
+                        trackedWorkMins += blockDur;
+                        blocksHTML += `<div class="log-item"><span>🕒 ${log.start} - ${log.end} Uhr (${minsToClock(blockDur)})</span><button class="delete-btn" onclick="deleteLog(${log.id})">✕</button></div>`;
+                    }
                 });
 
-                // Pausen-Logik (Die intelligente Berechnung)
-                let totalPresence = maxEnd - minStart; 
-                let takenBreak = totalPresence - trackedWorkMins; // Die echte Lücke zwischen den Blöcken!
-                
-                // Wie viel Pause verlangt das Gesetz basierend auf der gestoppten Arbeit?
-                let requiredBreak = 0;
-                if (trackedWorkMins >= 540) requiredBreak = 45; // ab 9 Stunden
-                else if (trackedWorkMins >= 360) requiredBreak = 30; // ab 6 Stunden
+                let dayDiffMins = 0;
+                let netWorkMins = 0;
+                let summaryHTML = "";
 
-                // Wurde zu wenig Pause gemacht? Wenn ja, Differenz abziehen
-                let missingBreak = Math.max(0, requiredBreak - takenBreak);
-                let netWorkMins = trackedWorkMins - missingBreak;
-                
-                // Differenz zum Soll
-                let netWorkDezimal = netWorkMins / 60;
-                let diff = netWorkDezimal - sollStd;
-                let diffClass = diff >= 0 ? "overtime" : "undertime";
+                if(isAbsence) {
+                    // BEI URLAUB/KRANK: Sollstunden werden gutgeschrieben (Differenz = 0)
+                    dayDiffMins = 0;
+                    netWorkMins = sollStd * 60; 
+                    summaryHTML = `
+                        <b>Abrechnung: ${sollStd.toFixed(2)} Dezimal-Stunden (Gutgeschrieben)</b><br>
+                        <span style="color:#888;">Tages-Saldo: +0.00h (Soll erfüllt durch ${absenceName})</span>
+                    `;
+                } else {
+                    // NORMALE ARBEIT
+                    let totalPresence = maxEnd - minStart; 
+                    let takenBreak = totalPresence - trackedWorkMins;
+                    let requiredBreak = 0;
+                    if (trackedWorkMins >= 540) requiredBreak = 45;
+                    else if (trackedWorkMins >= 360) requiredBreak = 30;
 
-                // Tag anzeigen
-                let dayContainer = document.createElement('div');
-                dayContainer.className = "day-group";
-                dayContainer.innerHTML = `
-                    <div class="day-header">
-                        <span>📅 ${formatDate(date)}</span>
-                        <span>Netto: ${minsToClock(netWorkMins)}</span>
-                    </div>
-                    ${blocksHTML}
-                    <div class="day-summary">
-                        <b>Zusammenfassung des Tages:</b><br>
-                        Gesamte Arbeitszeit (gestoppt): ${minsToClock(trackedWorkMins)}<br>
-                        Bereits gemachte Pausen (Lücken): ${takenBreak} Min.<br>
-                        Gesetzlich gefordert: ${requiredBreak} Min.<br>
-                        <span style="color: #ff9500;">Automatischer Abzug (fehlende Pause): -${missingBreak} Min.</span><br>
-                        <b>Abrechnung: ${netWorkDezimal.toFixed(2)} Dezimal-Stunden</b><br>
-                        <span class="${diffClass}">Tages-Saldo: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)} Stunden</span>
-                    </div>
-                `;
-                list.appendChild(dayContainer);
+                    let missingBreak = Math.max(0, requiredBreak - takenBreak);
+                    netWorkMins = trackedWorkMins - missingBreak;
+                    dayDiffMins = netWorkMins - (sollStd * 60);
+                    
+                    let diffDezimal = dayDiffMins / 60;
+                    let diffClass = diffDezimal >= 0 ? "overtime" : "undertime";
+                    
+                    summaryHTML = `
+                        <b>Abrechnung: ${(netWorkMins/60).toFixed(2)} Dezimal-Stunden</b><br>
+                        <span class="${diffClass}">Tages-Saldo: ${diffDezimal >= 0 ? '+' : ''}${diffDezimal.toFixed(2)}h</span>
+                    `;
+                }
+
+                let dayMonth = date.substring(0, 7); 
+                if (dayMonth < selectedMonth) {
+                    pastDiffMins += dayDiffMins;
+                } 
+                else if (dayMonth === selectedMonth) {
+                    currentDiffMins += dayDiffMins;
+                    htmlOutput += `
+                        <div class="day-group">
+                            <div class="day-header"><span>📅 ${formatDate(date)}</span><span>Netto: ${minsToClock(netWorkMins)}</span></div>
+                            ${blocksHTML}
+                            <div class="day-summary">${summaryHTML}</div>
+                        </div>
+                    `;
+                }
             });
+
+            let pastH = (pastDiffMins / 60).toFixed(2);
+            let pastClass = pastDiffMins >= 0 ? "overtime" : "undertime";
+            let carryOverHTML = `
+                <div class="info-box">
+                    <b>Übertrag aus Vormonaten:</b> 
+                    <span class="${pastClass}" style="float: right;">${pastDiffMins >= 0 ? '+' : ''}${pastH} Std.</span>
+                </div>
+            `;
+
+            let totalMins = pastDiffMins + currentDiffMins;
+            let totalH = (totalMins / 60).toFixed(2);
+            let totalClass = totalMins >= 0 ? "overtime" : "undertime";
+            let totalHTML = `
+                <div class="total-box">
+                    <b>NEUER GESAMTSALDO</b><br>
+                    <span class="${totalClass}" style="font-size: 24px;">${totalMins >= 0 ? '+' : ''}${totalH} Stunden</span>
+                </div>
+            `;
+
+            if(htmlOutput === "") { htmlOutput = "<p style='text-align:center; color:#888;'>Keine Einträge in diesem Monat.</p>"; }
+            list.innerHTML = carryOverHTML + htmlOutput + totalHTML;
         }
 
         // --- E-MAIL EXPORT ---
         function sendEmail() {
             const name = document.getElementById('userName').value || "Mitarbeiter";
+            const selectedMonth = document.getElementById('monthPicker').value;
+            
             let bodyText = `ZEITERFASSUNG BERICHT: ${name}\n`;
+            bodyText += `Monat: ${selectedMonth}\n`;
             bodyText += `====================================\n\n`;
 
             const list = document.getElementById('logList');
-            // Wir bedienen uns eines kleinen Tricks und exportieren den formatierten Text direkt aus der Anzeige
+            let carryOver = list.querySelector('.info-box span').innerText;
+            bodyText += `Übertrag aus Vormonaten: ${carryOver}\n\n`;
+
             let days = document.querySelectorAll('.day-group');
             days.forEach(day => {
                 let date = day.querySelector('.day-header span').innerText;
@@ -260,12 +307,20 @@
                 let summary = day.querySelector('.day-summary').innerText;
                 
                 bodyText += `${date} | ${net}\n`;
-                blocks.forEach(b => bodyText += `  - ${b.innerText}\n`);
-                bodyText += `\n  ${summary.replace(/\n/g, '\n  ')}\n`;
+                blocks.forEach(b => {
+                    // "X"-Button Text aus E-Mail entfernen
+                    let blockText = b.innerText.replace('✕', '').trim();
+                    bodyText += `  - ${blockText}\n`;
+                });
+                let saldoLine = summary.split('\n').pop();
+                bodyText += `  ${saldoLine}\n`;
                 bodyText += `------------------------------------\n`;
             });
 
-            window.location.href = `mailto:?subject=Zeiten_${name}&body=${encodeURIComponent(bodyText)}`;
+            let total = list.querySelector('.total-box span').innerText;
+            bodyText += `\nNEUER GESAMTSALDO ENDE ${selectedMonth}: ${total}\n`;
+
+            window.location.href = `mailto:?subject=Zeiten_${name}_${selectedMonth}&body=${encodeURIComponent(bodyText)}`;
         }
     </script>
 </body>
